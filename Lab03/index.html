@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Interactive Movie Ratings Visualization</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        .bar {
+            fill: steelblue;
+        }
+
+        .bar:hover {
+            fill: orange;
+            cursor: pointer;
+        }
+
+        .axis--x path {
+            display: none;
+        }
+
+        .axis text {
+            font-size: 12px;
+        }
+
+        .chart-title {
+            font-size: 18px;
+            text-anchor: middle;
+        }
+
+        .back-button {
+            font-size: 14px;
+            cursor: pointer;
+            fill: blue;
+            text-decoration: underline;
+        }
+
+        .timeline-circle {
+            fill: steelblue;
+            stroke: black;
+            stroke-width: 1px;
+        }
+
+        .timeline-line {
+            stroke: black;
+            stroke-width: 1px;
+        }
+
+        .timeline-text {
+            font-size: 12px;
+            text-anchor: middle;
+        }
+
+        .label {
+            fill: black;
+            font-size: 12px;
+            text-anchor: middle;
+        }
+        .infoBox {
+            font-size: 20px;
+            padding: 10px;
+            margin: 10px;
+            border: 1px solid black;
+            background-color: #f9f9f9;
+            width: 50%;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="infoBox">
+        This is a simple interactive visualization that shows the mean movie ratings by year. Click on a bar to see the
+        ratings of individual movies for that year. Click on a movie to see the diary entries for that movie.
+        The data is loaded from my movie diary (Letterboxd), which contains ratings for movies I have watched over the
+        years. The visualization is implemented using D3.js.
+    </div>
+    <svg width="1500" height="600"></svg>
+    <script>
+        const svg = d3.select("svg"),
+            margin = { top: 50, right: 20, bottom: 150, left: 60 },
+            width = +svg.attr("width") - margin.left - margin.right,
+            height = +svg.attr("height") - margin.top - margin.bottom;
+
+        const g = svg.append("g")
+            .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+        let xScale = d3.scaleLinear();
+        const yScale = d3.scaleLinear();
+
+        // Global variables to manage the state
+        let dataAll;
+        let diaryData;
+        let currentView = 'year'; // 'year', 'movies', or 'diary'
+
+        // Stack to keep track of the navigation history
+        const viewStack = [];
+
+        // Load both CSV files
+        Promise.all([
+            d3.csv("assets/ratings.csv"),
+            d3.csv("assets/diary.csv")
+        ]).then(function (files) {
+            dataAll = files[0]; // ratings
+            diaryData = files[1]; // diary
+
+            // Convert strings to numbers and dates
+            dataAll.forEach(function (d) {
+                d.Rating = +d.Rating;
+                d.Year = +d.Year;
+            });
+
+            diaryData.forEach(function (d) {
+                d.Date = new Date(d.Date);
+                d.Rating = +d.Rating;
+            });
+
+            drawYearChart();
+
+        }).catch(function (error) {
+            console.error('Error loading or parsing data:', error);
+        });
+
+        function drawYearChart() {
+            currentView = 'year';
+            viewStack.push(drawYearChart);
+
+            // Remove any existing chart elements
+            g.selectAll("*").remove();
+            svg.selectAll(".back-button").remove();
+            svg.selectAll(".chart-title").remove();
+            svg.on(".zoom", null); // Disable previous zoom
+
+            // Group data by Year and compute mean Rating
+            const meanRatings = d3.rollups(
+                dataAll,
+                v => d3.mean(v, d => d.Rating),
+                d => d.Year
+            ).map(d => ({ Year: d[0], MeanRating: d[1] }));
+
+            // Sort by Year
+            meanRatings.sort((a, b) => a.Year - b.Year);
+
+            // Update scales
+            xScale = d3.scaleLinear()
+                .domain(d3.extent(meanRatings, d => d.Year))
+                .range([0, width]);
+
+            yScale.domain([0, d3.max(meanRatings, d => d.MeanRating)])
+                .range([height, 0]);
+
+            const xAxisGroup = g.append("g")
+                .attr("class", "axis axis--x")
+                .attr("transform", "translate(0," + height + ")")
+                .call(d3.axisBottom(xScale).ticks(10).tickFormat(d3.format("d")));
+
+            const yAxisGroup = g.append("g")
+                .attr("class", "axis axis--y")
+                .call(d3.axisLeft(yScale).ticks(5));
+
+            // Chart Title
+            svg.append("text")
+                .attr("class", "chart-title")
+                .attr("x", (width + margin.left + margin.right) / 2)
+                .attr("y", margin.top / 2)
+                .attr("text-anchor", "middle")
+                .text("Mean Movie Ratings by Year (Total: " + dataAll.length + " movies)");
+
+            // Bars
+            const barWidth = 15;
+
+            const bars = g.selectAll(".bar")
+                .data(meanRatings)
+                .enter().append("rect")
+                .attr("class", "bar")
+                .attr("x", d => xScale(d.Year) - barWidth / 2)
+                .attr("y", height)
+                .attr("width", barWidth)
+                .attr("height", 0)
+                .on("click", function (event, d) {
+                    drawMovieChart(d.Year);
+                });
+
+            // tooltip
+            bars.append("title")
+                .text(d => `Year: ${d.Year}\nMean Rating: ${d.MeanRating.toFixed(2)}`);
+
+            bars.transition()
+                .duration(1000)
+                .attr("y", d => yScale(d.MeanRating))
+                .attr("height", d => height - yScale(d.MeanRating));
+
+            // zooming with fixed axes
+            const zoom = d3.zoom()
+                .scaleExtent([1, 10])
+                .translateExtent([[0, 0], [width, height]])
+                .extent([[0, 0], [width, height]])
+                .on("zoom", zoomed);
+
+            svg.call(zoom);
+
+            function zoomed(event) {
+                const newXScale = event.transform.rescaleX(xScale);
+                xAxisGroup.call(d3.axisBottom(newXScale).ticks(10).tickFormat(d3.format("d")));
+
+                // Update bars
+                bars.attr("x", d => newXScale(d.Year) - barWidth / 2)
+                    .attr("width", barWidth * event.transform.k);
+            }
+
+            // back button only if not at the root view
+            if (viewStack.length > 1) {
+                svg.append("text")
+                    .attr("class", "back-button")
+                    .attr("x", margin.left)
+                    .attr("y", margin.top / 2)
+                    .text("← Back")
+                    .on("click", function () {
+                        viewStack.pop(); // Remove current view
+                        const previousView = viewStack.pop(); // Get previous view
+                        previousView(); // Draw previous view
+                    });
+            }
+        }
+
+        function drawMovieChart(selectedYear) {
+            currentView = 'movies';
+            viewStack.push(() => drawMovieChart(selectedYear));
+
+            // Remove existing chart elements
+            g.selectAll("*").remove();
+            svg.selectAll(".chart-title").remove();
+            svg.selectAll(".back-button").remove();
+            svg.on(".zoom", null); // Disable zoom
+
+            const dataYear = dataAll.filter(d => d.Year === selectedYear);
+
+            // Sort movies by rating
+            dataYear.sort((a, b) => b.Rating - a.Rating);
+
+            // Update scales
+            const xScale = d3.scaleBand()
+                .domain(dataYear.map(d => d.Name))
+                .range([0, width])
+                .padding(0.1);
+
+            yScale.domain([0, d3.max(dataYear, d => d.Rating)])
+                .range([height, 0]);
+
+            // X Axis
+            const xAxisGroup = g.append("g")
+                .attr("class", "axis axis--x")
+                .attr("transform", "translate(0," + height + ")")
+                .call(d3.axisBottom(xScale));
+
+            xAxisGroup.selectAll("text")
+                .attr("transform", "rotate(-90)")
+                .attr("dx", "-0.8em")
+                .attr("dy", "-0.5em")
+                .style("text-anchor", "end");
+
+            // Y Axis
+            g.append("g")
+                .attr("class", "axis axis--y")
+                .call(d3.axisLeft(yScale).ticks(5));
+
+            // Chart Title
+            svg.append("text")
+                .attr("class", "chart-title")
+                .attr("x", (width + margin.left + margin.right) / 2)
+                .attr("y", margin.top / 2)
+                .attr("text-anchor", "middle")
+                .text(`Movie Ratings for Year ${selectedYear} (Total: ${dataYear.length} ${dataYear.length > 1 ? "movies)" : "movie)"}`);
+
+            // Back Button
+            svg.append("text")
+                .attr("class", "back-button")
+                .attr("x", margin.left)
+                .attr("y", margin.top / 2)
+                .text("← Back")
+                .on("click", function () {
+                    viewStack.pop();
+                    const previousView = viewStack.pop();
+                    previousView();
+                });
+
+            // Bars
+            const bars = g.selectAll(".bar")
+                .data(dataYear)
+                .enter().append("rect")
+                .attr("class", "bar")
+                .attr("x", d => xScale(d.Name))
+                .attr("y", height)
+                .attr("width", xScale.bandwidth())
+                .attr("height", 0)
+                .on("click", function (event, d) {
+                    drawDiaryChart(d);
+                });
+
+            // tooltip
+            bars.append("title")
+                .text(d => `Movie: ${d.Name}\nRating: ${d.Rating}`);
+
+            bars.transition()
+                .duration(1000)
+                .attr("y", d => yScale(d.Rating))
+                .attr("height", d => height - yScale(d.Rating));
+
+            // labels to show the rating on top of each bar
+            g.selectAll(".label")
+                .data(dataYear)
+                .enter().append("text")
+                .attr("class", "label")
+                .attr("x", d => xScale(d.Name) + xScale.bandwidth() / 2)
+                .attr("y", d => yScale(d.Rating) - 5)
+                .attr("text-anchor", "middle")
+                .text(d => d.Rating);
+        }
+
+        function drawDiaryChart(movieData) {
+            currentView = 'diary';
+            viewStack.push(() => drawDiaryChart(movieData));
+
+            // Remove existing chart elements
+            g.selectAll("*").remove();
+            svg.selectAll(".chart-title").remove();
+            svg.selectAll(".back-button").remove();
+            svg.on(".zoom", null); // Disable zoom
+
+            // Filter diary data for the selected movie
+            const diaryEntries = diaryData.filter(d => d['Name'] === movieData['Name']);
+
+            // Ensure ratings are numbers
+            diaryEntries.forEach(function (d) {
+                d.Rating = +d.Rating;
+            });
+
+            // Chart Title
+            svg.append("text")
+                .attr("class", "chart-title")
+                .attr("x", (width + margin.left + margin.right) / 2)
+                .attr("y", margin.top / 2)
+                .attr("text-anchor", "middle")
+                .text(`Diary Entries for ${movieData.Name} (Total: ${diaryEntries.length} ${diaryEntries.length > 1 ? 'entries' : 'entry'})`);
+
+            // Back Button
+            svg.append("text")
+                .attr("class", "back-button")
+                .attr("x", margin.left)
+                .attr("y", margin.top / 2)
+                .text("← Back")
+                .on("click", function () {
+                    viewStack.pop();
+                    const previousView = viewStack.pop();
+                    previousView();
+                });
+
+            if (diaryEntries.length === 0) {
+                g.append("text")
+                    .attr("x", width / 2)
+                    .attr("y", height / 2)
+                    .attr("text-anchor", "middle")
+                    .text(`No diary entries found for ${movieData.Name}`);
+            } else {
+                diaryEntries.sort((a, b) => a.Date - b.Date);
+
+                const xScaleTime = d3.scaleTime()
+                    .domain(d3.extent(diaryEntries, d => d.Date))
+                    .range([0, width]);
+
+                const yScaleRating = d3.scaleLinear()
+                    .domain([0, d3.max(diaryEntries, d => d.Rating)])
+                    .range([height - margin.bottom, margin.top]);
+
+                const yPos = height / 2;
+
+                // timeline line
+                g.append("line")
+                    .attr("class", "timeline-line")
+                    .attr("x1", 0)
+                    .attr("y1", yPos)
+                    .attr("x2", width)
+                    .attr("y2", yPos);
+
+                // stems for ratings
+                g.selectAll(".rating-line")
+                    .data(diaryEntries)
+                    .enter().append("line")
+                    .attr("class", "rating-line")
+                    .attr("x1", d => xScaleTime(d.Date))
+                    .attr("y1", yPos)
+                    .attr("x2", d => xScaleTime(d.Date))
+                    .attr("y2", d => yScaleRating(d.Rating))
+                    .attr("stroke", "steelblue")
+                    .attr("stroke-width", 2);
+
+                // circles at the end of stems
+                g.selectAll(".timeline-circle")
+                    .data(diaryEntries)
+                    .enter().append("circle")
+                    .attr("class", "timeline-circle")
+                    .attr("cx", d => xScaleTime(d.Date))
+                    .attr("cy", d => yScaleRating(d.Rating))
+                    .attr("r", 5)
+                    .append("title")
+                    .text(d => `Date: ${d3.timeFormat("%Y-%m-%d")(d.Date)}\nRating: ${d.Rating}`);
+
+                // date labels evenly below the line
+                g.selectAll(".timeline-text")
+                    .data(diaryEntries)
+                    .enter().append("text")
+                    .attr("class", "timeline-text")
+                    .attr("x", d => xScaleTime(d.Date))
+                    .attr("y", yPos + 20)
+                    .attr("text-anchor", "middle")
+                    .text(d => d3.timeFormat("%Y-%m-%d")(d.Date));
+
+                // rating labels next to the circles
+                g.selectAll(".rating-label")
+                    .data(diaryEntries)
+                    .enter().append("text")
+                    .attr("class", "label")
+                    .attr("x", d => xScaleTime(d.Date))
+                    .attr("y", d => yScaleRating(d.Rating) - 10)
+                    .attr("text-anchor", "middle")
+                    .text(d => d.Rating);
+            }
+        }
+    </script>
+
+</body>
+
+</html>
