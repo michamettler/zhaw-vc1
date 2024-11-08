@@ -8,6 +8,7 @@
         body {
             margin: 0;
             overflow: hidden;
+            font-family: Arial, sans-serif;
         }
 
         #container {
@@ -23,6 +24,22 @@
             padding: 10px;
             border-radius: 5px;
             z-index: 1000;
+        }
+
+        #infoPanel {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: #fff;
+            padding: 15px;
+            border-radius: 8px;
+            max-width: 250px;
+            z-index: 1000;
+        }
+
+        h3 {
+            margin-top: 0;
         }
     </style>
 </head>
@@ -41,6 +58,13 @@
 
         <label for="metalness">Metalness:</label>
         <input type="range" id="metalness" min="0" max="1" step="0.01" value="0.5">
+    </div>
+
+    <div id="infoPanel">
+        <h3>Instrument Information</h3>
+        <p><strong>Year:</strong> 1965</p>
+        <p><strong>Artist Played:</strong> Quincy Jones</p>
+        <p><strong>Model:</strong> Gibson ES-335</p>
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -121,7 +145,6 @@
                 console.error('An error occurred while loading the model:', error);
             });
 
-        // Event listeners for control elements
         document.getElementById('baseColor').addEventListener('input', (event) => {
             if (baseMaterial) {
                 baseMaterial.color.set(event.target.value);
