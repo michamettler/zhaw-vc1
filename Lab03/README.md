@@ -1,1 +1,0 @@
-https://michamettler.github.io/letterboxd-overview/
